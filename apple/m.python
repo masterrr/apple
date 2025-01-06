@@ -35,9 +35,9 @@ class MacBookPriceScraper:
         }
 
     def parse_us_price(self, price_str):
-        """Handle prices like $1,599.00"""
+        """Handle prices like $1,599.00 or AED 6,899.00"""
         # Remove currency symbols and spaces
-        price_str = re.sub(r'[$£\s]', '', price_str)
+        price_str = re.sub(r'[$£AED\s]', '', price_str)
         # Remove commas and convert to float
         return float(price_str.replace(',', ''))
 
