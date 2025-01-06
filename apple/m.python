@@ -1,0 +1,173 @@
+import requests
+from bs4 import BeautifulSoup
+import json
+from datetime import datetime, timedelta
+import os
+from termcolor import colored
+import re
+
+class MacBookPriceScraper:
+    def __init__(self):
+        self.cache_file = 'macbook_prices_cache.json'
+        self.exchange_rates_cache = 'exchange_rates_cache.json'
+        self.cache_validity = timedelta(hours=24)
+
+        # Updated regions map with specific currency formatting rules
+        self.regions = {
+            'us': ('com', 'USD', self.parse_us_price),
+            'uk': ('co.uk', 'GBP', self.parse_us_price),  # UK uses same format as US
+            'pl': ('pl', 'PLN', self.parse_european_price),
+            'fr': ('fr', 'EUR', self.parse_european_price),
+            'ae': ('ae', 'AED', self.parse_us_price),
+            'de': ('de', 'EUR', self.parse_european_price),
+            'it': ('it', 'EUR', self.parse_european_price),
+            'es': ('es', 'EUR', self.parse_european_price),
+            'pt': ('pt', 'EUR', self.parse_european_price),
+            'at': ('at', 'EUR', self.parse_european_price),
+            'se': ('se', 'SEK', self.parse_european_price),
+            'no': ('no', 'NOK', self.parse_european_price),
+            'dk': ('dk', 'DKK', self.parse_european_price),
+            'fi': ('fi', 'EUR', self.parse_european_price),
+            'jp': ('jp', 'JPY', self.parse_japanese_price),
+            'tr': ('com.tr', 'TRY', self.parse_european_price),
+            'cz': ('cz', 'CZK', self.parse_european_price),
+            'hu': ('hu', 'HUF', self.parse_hungarian_price)
+        }
+
+    def parse_us_price(self, price_str):
+        """Handle prices like $1,599.00"""
+        # Remove currency symbols and spaces
+        price_str = re.sub(r'[$£\s]', '', price_str)
+        # Remove commas and convert to float
+        return float(price_str.replace(',', ''))
+
+    def parse_european_price(self, price_str):
+        """Handle prices like 1.899,00 €"""
+        # Remove currency symbols and spaces
+        price_str = re.sub(r'[€kr.TLKčzł\s]', '', price_str)
+        # Remove dots (thousand separators) and replace comma with dot
+        price_str = price_str.replace('.', '').replace(',', '.')
+        return float(price_str)
+
+    def parse_japanese_price(self, price_str):
+        """Handle prices like 248,800円（税込）"""
+        # Remove everything except digits
+        return float(re.sub(r'[^\d]', '', price_str))
+
+    def parse_hungarian_price(self, price_str):
+        """Handle prices like 799 990 Ft"""
+        # Remove everything except digits
+        return float(re.sub(r'[^\d]', '', price_str))
+
+    def get_exchange_rates(self):
+        try:
+            response = requests.get('https://api.exchangerate-api.com/v4/latest/USD')
+            data = response.json()
+            return data['rates']
+        except Exception as e:
+            print(f"Error fetching exchange rates: {e}")
+            return None
+
+    def clean_price(self, price_str, region):
+        try:
+            # Get the specific parsing function for the region
+            _, _, parse_func = self.regions[region]
+            return parse_func(price_str)
+        except Exception as e:
+            print(f"Error parsing price for {region}: {str(e)} (original: {price_str})")
+            return None
+
+    def scrape_macbook_price(self, region):
+        if region not in self.regions:
+            return None
+
+        domain_ext, currency_code, _ = self.regions[region]
+        url = f"https://www.apple.com/{region}/shop/buy-mac/macbook-pro/14-inch-space-black-standard-display-apple-m4-chip-with-10-core-cpu-and-10-core-gpu-16gb-memory-512gb"
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            price_element = soup.find(class_='rc-prices-fullprice')
+
+            if price_element:
+                price_str = price_element.get_text().strip()
+                price_value = self.clean_price(price_str, region)
+
+                if price_value is None:
+                    return None
+
+                # Convert to USD using exchange rates
+                rates = self.get_exchange_rates()
+                if rates and currency_code in rates:
+                    price_usd = price_value / rates[currency_code]
+                else:
+                    print(f"Warning: Could not convert {currency_code} to USD")
+                    return None
+
+                return {
+                    'region': region,
+                    'original_price': price_str,
+                    'currency': currency_code,
+                    'price_usd': round(price_usd, 2)
+                }
+
+        except Exception as e:
+            print(f"Error scraping {region}: {str(e)}")
+            return None
+
+    def get_all_prices(self):
+        results = []
+        for region in self.regions:
+            result = self.scrape_macbook_price(region)
+            if result:
+                results.append(result)
+
+        # Sort by USD price
+        results.sort(key=lambda x: x['price_usd'])
+        return results
+
+def print_colored_prices(prices):
+    # Find min and max prices for color scaling
+    min_price = min(p['price_usd'] for p in prices)
+    max_price = max(p['price_usd'] for p in prices)
+    price_range = max_price - min_price
+
+    print("\nMacBook Pro Prices (Ranked from cheapest to most expensive):\n")
+    print(f"Found prices for {len(prices)} regions\n")
+
+    last_price = None
+    for price_data in prices:
+        # Calculate color intensity based on price
+        price_ratio = (price_data['price_usd'] - min_price) / price_range
+
+        if price_ratio < 0.33:
+            color = 'green'
+        elif price_ratio < 0.66:
+            color = 'yellow'
+        else:
+            color = 'red'
+
+        # Calculate price difference from previous entry
+        if last_price is not None:
+            diff = price_data['price_usd'] - last_price
+            diff_str = f" (+${diff:.2f})"
+        else:
+            diff_str = ""
+
+        print(colored(
+            f"{price_data['region'].upper()}: {price_data['original_price']} "
+            f"(USD ${price_data['price_usd']:,.2f}{diff_str})",
+            color
+        ))
+
+        last_price = price_data['price_usd']
+
+if __name__ == "__main__":
+    scraper = MacBookPriceScraper()
+    prices = scraper.get_all_prices()
+    print_colored_prices(prices)
