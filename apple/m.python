@@ -12,51 +12,42 @@ class MacBookPriceScraper:
         self.exchange_rates_cache = 'exchange_rates_cache.json'
         self.cache_validity = timedelta(hours=24)
 
+        # Specific URLs for certain regions
+        self.specific_urls = {
+            'pl': 'https://www.apple.com/pl/shop/buy-mac/macbook-pro/14-cali-gwiezdna-czer%C5%84-wy%C5%9Bwietlacz-standardowy-czip-apple-m4-z-dziesi%C4%99ciordzeniowym-cpu-i-dziesi%C4%99ciordzeniowym-gpu-16-gb-pami%C4%99ci-ram-512gb',
+            'fr': 'https://www.apple.com/fr/shop/buy-mac/macbook-pro/14-pouces-noir-sid%C3%A9ral-verre-d%E2%80%99%C3%A9cran-standard-puce-apple-m4-avec-cpu-10-c%C5%93urs-et-gpu-10-c%C5%93urs-16-go-de-m%C3%A9moire-512go',
+            'ae': 'https://www.apple.com/ae/shop/buy-mac/macbook-pro/14-inch-space-black-standard-display-apple-m4-chip-with-10-core-cpu-and-10-core-gpu-16gb-memory-512gb',
+            'jp': 'https://www.apple.com/jp/shop/buy-mac/macbook-pro/14%E3%82%A4%E3%83%B3%E3%83%81-%E3%82%B9%E3%83%9A%E3%83%BC%E3%82%B9%E3%83%96%E3%83%A9%E3%83%83%E3%82%AF-%E6%A8%99%E6%BA%96%E3%83%87%E3%82%A3%E3%82%B9%E3%83%97%E3%83%AC%E3%82%A4-10%E3%82%B3%E3%82%A2cpu%E3%81%A810%E3%82%B3%E3%82%A2gpu%E6%90%AD%E8%BC%89apple-m4%E3%83%81%E3%83%83%E3%83%97-16gb%E3%83%A1%E3%83%A2%E3%83%AA-512gb',
+            'es': 'https://www.apple.com/es/shop/buy-mac/macbook-pro/14-pulgadas-negro-espacial-pantalla-est%C3%A1ndar-chip-m4-de-apple-con-cpu-de-10-n%C3%BAcleos-y-gpu-de-10-n%C3%BAcleos-16-gb-memoria-512gb'
+        }
+
         # Updated regions map with specific currency formatting rules
         self.regions = {
             'us': ('com', 'USD', self.parse_us_price),
-            'uk': ('co.uk', 'GBP', self.parse_us_price),  # UK uses same format as US
+            'uk': ('co.uk', 'GBP', self.parse_us_price),
             'pl': ('pl', 'PLN', self.parse_european_price),
             'fr': ('fr', 'EUR', self.parse_european_price),
             'ae': ('ae', 'AED', self.parse_us_price),
-            'de': ('de', 'EUR', self.parse_european_price),
-            'it': ('it', 'EUR', self.parse_european_price),
-            'es': ('es', 'EUR', self.parse_european_price),
-            'pt': ('pt', 'EUR', self.parse_european_price),
-            'at': ('at', 'EUR', self.parse_european_price),
-            'se': ('se', 'SEK', self.parse_european_price),
-            'no': ('no', 'NOK', self.parse_european_price),
-            'dk': ('dk', 'DKK', self.parse_european_price),
-            'fi': ('fi', 'EUR', self.parse_european_price),
             'jp': ('jp', 'JPY', self.parse_japanese_price),
-            'tr': ('com.tr', 'TRY', self.parse_european_price),
-            'cz': ('cz', 'CZK', self.parse_european_price),
-            'hu': ('hu', 'HUF', self.parse_hungarian_price)
+            'es': ('es', 'EUR', self.parse_european_price)
         }
+
+        # Generic URL pattern for regions without specific URLs
+        self.generic_url_pattern = "https://www.apple.com/{region}/shop/buy-mac/macbook-pro/14-inch-space-black-standard-display-apple-m4-chip-with-10-core-cpu-and-10-core-gpu-16gb-memory-512gb"
 
     def parse_us_price(self, price_str):
         """Handle prices like $1,599.00 or AED 6,899.00"""
-        # Remove currency symbols and spaces
         price_str = re.sub(r'[$£AED\s]', '', price_str)
-        # Remove commas and convert to float
         return float(price_str.replace(',', ''))
 
     def parse_european_price(self, price_str):
         """Handle prices like 1.899,00 €"""
-        # Remove currency symbols and spaces
         price_str = re.sub(r'[€kr.TLKčzł\s]', '', price_str)
-        # Remove dots (thousand separators) and replace comma with dot
         price_str = price_str.replace('.', '').replace(',', '.')
         return float(price_str)
 
     def parse_japanese_price(self, price_str):
         """Handle prices like 248,800円（税込）"""
-        # Remove everything except digits
-        return float(re.sub(r'[^\d]', '', price_str))
-
-    def parse_hungarian_price(self, price_str):
-        """Handle prices like 799 990 Ft"""
-        # Remove everything except digits
         return float(re.sub(r'[^\d]', '', price_str))
 
     def get_exchange_rates(self):
@@ -70,19 +61,24 @@ class MacBookPriceScraper:
 
     def clean_price(self, price_str, region):
         try:
-            # Get the specific parsing function for the region
             _, _, parse_func = self.regions[region]
             return parse_func(price_str)
         except Exception as e:
             print(f"Error parsing price for {region}: {str(e)} (original: {price_str})")
             return None
 
+    def get_url_for_region(self, region):
+        """Get the appropriate URL for a region, using specific URL if available"""
+        if region in self.specific_urls:
+            return self.specific_urls[region]
+        return self.generic_url_pattern.format(region=region)
+
     def scrape_macbook_price(self, region):
         if region not in self.regions:
             return None
 
         domain_ext, currency_code, _ = self.regions[region]
-        url = f"https://www.apple.com/{region}/shop/buy-mac/macbook-pro/14-inch-space-black-standard-display-apple-m4-chip-with-10-core-cpu-and-10-core-gpu-16gb-memory-512gb"
+        url = self.get_url_for_region(region)
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -92,7 +88,13 @@ class MacBookPriceScraper:
             response = requests.get(url, headers=headers)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Try multiple possible price element selectors
             price_element = soup.find(class_='rc-prices-fullprice')
+            if not price_element:
+                price_element = soup.find('span', {'data-pricing-part': 'price'})
+            if not price_element:
+                price_element = soup.find(class_='price-point-current')
 
             if price_element:
                 price_str = price_element.get_text().strip()
@@ -127,42 +129,70 @@ class MacBookPriceScraper:
             if result:
                 results.append(result)
 
-        # Sort by USD price
         results.sort(key=lambda x: x['price_usd'])
         return results
 
+def get_gradient_color(ratio):
+    """Returns color and attributes based on price ratio"""
+    if ratio < 0.15:
+        return 'green', ['bold']
+    elif ratio < 0.3:
+        return 'green', []
+    elif ratio < 0.45:
+        return 'cyan', ['bold']
+    elif ratio < 0.55:
+        return 'cyan', []
+    elif ratio < 0.65:
+        return 'yellow', ['bold']
+    elif ratio < 0.75:
+        return 'yellow', []
+    elif ratio < 0.85:
+        return 'red', []
+    else:
+        return 'red', ['bold']
+
 def print_colored_prices(prices):
-    # Find min and max prices for color scaling
+    if not prices:
+        print("No prices were successfully retrieved.")
+        return
+
     min_price = min(p['price_usd'] for p in prices)
     max_price = max(p['price_usd'] for p in prices)
     price_range = max_price - min_price
 
     print("\nMacBook Pro Prices (Ranked from cheapest to most expensive):\n")
     print(f"Found prices for {len(prices)} regions\n")
+    print("Color legend:")
+    print(colored("■", 'green', attrs=['bold']) + " Excellent deal")
+    print(colored("■", 'green') + " Very good price")
+    print(colored("■", 'cyan', attrs=['bold']) + " Good price")
+    print(colored("■", 'cyan') + " Average price")
+    print(colored("■", 'yellow', attrs=['bold']) + " Slightly expensive")
+    print(colored("■", 'yellow') + " Expensive")
+    print(colored("■", 'red') + " Very expensive")
+    print(colored("■", 'red', attrs=['bold']) + " Premium pricing")
+    print()
 
     last_price = None
     for price_data in prices:
-        # Calculate color intensity based on price
         price_ratio = (price_data['price_usd'] - min_price) / price_range
+        color, attrs = get_gradient_color(price_ratio)
 
-        if price_ratio < 0.33:
-            color = 'green'
-        elif price_ratio < 0.66:
-            color = 'yellow'
-        else:
-            color = 'red'
-
-        # Calculate price difference from previous entry
         if last_price is not None:
             diff = price_data['price_usd'] - last_price
-            diff_str = f" (+${diff:.2f})"
+            diff_percentage = (diff / last_price) * 100
+            diff_str = f" (+${diff:.2f}, +{diff_percentage:.1f}%)"
         else:
             diff_str = ""
 
+        diff_from_min = ((price_data['price_usd'] - min_price) / min_price) * 100
+        min_diff_str = f" (+{diff_from_min:.1f}% vs lowest)" if diff_from_min > 0 else ""
+
         print(colored(
             f"{price_data['region'].upper()}: {price_data['original_price']} "
-            f"(USD ${price_data['price_usd']:,.2f}{diff_str})",
-            color
+            f"(USD ${price_data['price_usd']:,.2f}{diff_str}{min_diff_str})",
+            color,
+            attrs=attrs
         ))
 
         last_price = price_data['price_usd']
